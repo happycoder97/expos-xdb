@@ -1,15 +1,16 @@
 use pancurses;
 use pancurses::Window;
+use std::thread;
+use std::time::{Duration, Instant};
 
-use std::convert::TryInto;
-
+use crate::layout::VBox;
 use crate::xsm::XSM;
 
 pub struct UI {
     stdscr: Window,
     xsm: XSM,
-    window_code: Window,
-    window_regs: Window,
+    window_code: VBox,
+    window_regs: VBox,
 }
 
 enum ColorPairs {
@@ -20,13 +21,14 @@ enum ColorPairs {
 impl UI {
     pub fn new(xsm: XSM) -> Self {
         let stdscr = pancurses::initscr();
+        pancurses::start_color();
         pancurses::cbreak();
         pancurses::noecho();
         stdscr.keypad(true);
         stdscr.clear();
         stdscr.refresh();
 
-        let (lines, cols) = stdscr.get_max_yx();
+        let (lines, _cols) = stdscr.get_max_yx();
         let window_code = pancurses::newwin(lines, 30, 0, 0);
         let window_regs = pancurses::newwin(lines, 30, 0, 30);
 
@@ -44,50 +46,64 @@ impl UI {
         Self {
             stdscr,
             xsm,
-            window_code,
-            window_regs,
+            window_code: VBox::new(window_code, 2),
+            window_regs: VBox::new(window_regs, 2),
         }
     }
 
     fn render_code(&mut self) {
-        self.window_code.clear();
-        self.window_code.mvaddstr(1, 2, "CODE");
-        self.window_code.mv(2, 0);
-        self.window_code.hline(pancurses::ACS_HLINE(), 1000);
-        let begin_y = 3;
+        let window = &mut self.window_code;
+        window.clear();
+        window.text("CODE");
+        window.hline();
 
-        let lines = self.window_code.get_max_y() as usize - begin_y;
-        let t = std::time::Instant::now();
+        let lines = window.get_remaining_lines() as usize;
         let (base, ip, code_lines) = self.xsm.get_code(lines);
-        eprintln!("Get code: {}", t.elapsed().as_millis());
         for (i, code) in code_lines.iter().enumerate() {
-            self.window_code.mv((begin_y + i) as i32, 2);
             if base + i == ip {
-                self.window_code.color_set(ColorPairs::Selected as i16);
+                window.get_window().color_set(ColorPairs::Selected as i16);
             }
-            self.window_code.addstr(format!("{}: ", base + 2 * i));
-            self.window_code.addstr(code);
+            window.text_no_nl(format!("{}: ", base + 2 * i));
+            window.text(code);
             if base + i == ip {
-                self.window_code.color_set(ColorPairs::Normal as i16);
+                window.get_window().color_set(ColorPairs::Normal as i16);
             }
         }
-        self.window_code.draw_box(0, 0);
-        self.window_code.refresh();
+        window.render();
     }
 
     fn render_regs(&mut self) {
+        let window = &mut self.window_regs;
+        window.clear();
 
+        window.text("REGISTERS");
+        window.hline();
+
+        for i in 0..=15usize {
+            window.text(format!("R{}: {}", i, &self.xsm.get_regs().r[i]));
+        }
+
+        for i in 15..20usize {
+            window.text(format!("R{}: {}", i, &self.xsm.get_regs().r[i]));
+        }
+
+        for i in 0..4usize {
+            window.text(format!("P{}: {}", i, &self.xsm.get_regs().p[i]));
+        }
+        window.render();
     }
 
     pub fn render_loop(&mut self) {
-        for i in 0..2 {
+        for _ in 0..1000 {
             eprintln!("----");
-            let t = std::time::Instant::now();
+            let t = Instant::now();
             self.render_code();
+            self.render_regs();
             eprintln!("Render code: {}", t.elapsed().as_millis());
-            let t = std::time::Instant::now();
+            let t = Instant::now();
             self.xsm.step();
             eprintln!("Step: {}", t.elapsed().as_millis());
+            thread::sleep(Duration::from_millis(500));
             // let ch: pancurses::Input = self.stdscr.getch().unwrap();
             // if ch == pancurses::Input::Character('s') {
             // } else {

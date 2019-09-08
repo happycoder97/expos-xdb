@@ -1,19 +1,21 @@
-use rexpect;
-use rexpect::session::PtySession;
-use rexpect::ReadUntil;
+use std::io::{self, BufRead, BufReader, Write};
+use std::process::{Child, ChildStdin, ChildStdout, Command};
 
 use std::fs;
 
 const XSM_PAGE_LEN: usize = 512;
 
 pub struct XSM {
-    xsm: PtySession,
+    xsm: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
     mode: Mode,
     regs: XSMRegs,
     page_table: Vec<XSMPageTableEntry>,
     errors: Vec<XSMError>,
     output: String,
     halted: bool,
+    step_output: String,
 }
 
 #[derive(Debug)]
@@ -58,17 +60,17 @@ pub enum Mode {
 
 #[derive(Debug)]
 pub struct XSMRegs {
-    r: [String; 20],
-    p: [String; 4],
-    bp: String,
-    sp: String,
-    ip: String,
-    ptbr: String,
-    ptlr: String,
-    eip: String,
-    ec: String,
-    epn: String,
-    ema: String,
+    pub r: [String; 20],
+    pub p: [String; 4],
+    pub bp: String,
+    pub sp: String,
+    pub ip: String,
+    pub ptbr: String,
+    pub ptlr: String,
+    pub eip: String,
+    pub ec: String,
+    pub epn: String,
+    pub ema: String,
 }
 
 impl Default for XSMRegs {
@@ -89,100 +91,93 @@ impl Default for XSMRegs {
     }
 }
 
-#[derive(Debug)]
-pub enum XSMSpawnError {
-    CommandNotFound,
-    FailedToEnterDebugMode { lines_read: Vec<String> },
-}
-
 impl XSM {
-    pub fn spawn_new(command: &str) -> Result<XSM, XSMSpawnError> {
-        let xsm_process =
-            rexpect::spawn(command, Some(10)).map_err(|_| XSMSpawnError::CommandNotFound)?;
+    pub fn spawn_new(command: &str) -> io::Result<XSM> {
+        let mut stdbuf_args = vec!["--output=L"];
+        stdbuf_args.extend(command.split_whitespace());
+
+        let mut xsm_process = Command::new("stdbuf")
+            .args(&stdbuf_args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()?;
+
+        let stdout = xsm_process.stdout.take().expect("Failed to get stdout");
+        let stdin = xsm_process.stdin.take().expect("Failed to get stdin");
+        let buf_reader = BufReader::new(stdout);
+
         let mut xsm = XSM {
             xsm: xsm_process,
+            stdin,
+            stdout: buf_reader,
             mode: Mode::Kernel,
             regs: XSMRegs::default(),
-            page_table: Vec::default(),
-            errors: Vec::default(),
-            output: String::default(),
+            page_table: Vec::new(),
+            errors: Vec::new(),
+            output: String::new(),
             halted: false,
+            step_output: String::new(),
         };
-        xsm.load_state().map_err(|e| {
-            if let XSMInternalError::DebugModeNotEntered { lines_read } = e {
-                XSMSpawnError::FailedToEnterDebugMode { lines_read }
-            } else {
-                panic!("Invalid error")
-            }
-        })?;
+
+        xsm.load_state();
         Ok(xsm)
+    }
+
+    fn get_stdout(&mut self, lines: usize) -> Vec<String> {
+        let mut vec = Vec::with_capacity(lines);
+        for _ in 0..lines {
+            vec.push(String::new());
+            self.stdout
+                .read_line(vec.last_mut().unwrap())
+                .expect("Failed to read from stdout");
+        }
+        vec
     }
 
     /// Must be called right after entering debug mode
     /// or right after sending step command
     /// Returns: Mode, Program output if there was an out instruction
-    fn load_state(&mut self) -> Result<(), XSMInternalError> {
-        let t = std::time::Instant::now();
-        let status = Self::_read_status(&mut self.xsm);
-        eprintln!("Read status: {}", t.elapsed().as_millis());
-        let t = std::time::Instant::now();
-        self.xsm.exp_char('>').map_err(|_| {
-            let mut v = Vec::new();
-            while let Ok(line) = self.xsm.read_line() {
-                v.push(line);
-            }
-            XSMInternalError::DebugModeNotEntered { lines_read: v }
-        })?;
-        eprintln!("Return to prompt: {}", t.elapsed().as_millis());
-        let (mode, output) = status.expect("Failed to read status");
-        self.mode = mode;
-        self.output = output;
-        let t = std::time::Instant::now();
-        Self::_read_regs(&mut self.xsm, &mut self.regs);
-        eprintln!("Read regs: {}", t.elapsed().as_millis());
+    fn load_state(&mut self) {
         self.errors.clear();
-        // let page_table =
-        //     match Self::_read_page_table(&mut self.xsm, &self.regs.ptbr, &self.regs.ptlr) {
-        //         Ok(page_table) => page_table,
-        //         Err(e) => {
-        //             self.errors.push(e);
-        //             Vec::new()
-        //         }
-        //     };
-        Ok(())
+
+        eprintln!("Reading status");
+        let t = std::time::Instant::now();
+        self._read_status();
+        eprintln!("Read status: {}", t.elapsed().as_millis());
+
+        eprintln!("Reading regs");
+        let t = std::time::Instant::now();
+        self._read_regs();
+        eprintln!("Read regs: {}", t.elapsed().as_millis());
+
+        eprintln!("Reading page table");
+        let t = std::time::Instant::now();
+        self._read_page_table();
+        eprintln!("Read page table: {}", t.elapsed().as_millis());
     }
 
     /// ------------ Called by load state --------------- ///
-    fn _read_status(xsm: &mut PtySession) -> Result<(Mode, String), String> {
-        let prog_out = xsm
-            .exp_string("Previous instruction")
-            .map_err(|_| String::from("Unable to read status"))?;
-        xsm.exp_string("Mode: ")
-            .map_err(|_| String::from("Unable to detect mode."))?;
-        let mode_str = xsm
-            .exp_any(vec![
-                ReadUntil::String("KERNEL".into()),
-                ReadUntil::String("USER".into()),
-            ])
-            .map_err(|_| String::from("Unexpected Mode value"))?
-            .1;
-        let mode = match mode_str.chars().nth(0).unwrap() {
+    fn _read_status(&mut self) {
+        let mut lines = self.get_stdout(3);
+        let mode_line;
+        if lines[0].starts_with("debug>") || lines[0].starts_with("Previous instruction at IP =") {
+            mode_line = &lines[1];
+        } else {
+            lines.extend(self.get_stdout(1).into_iter());
+            self.output = lines[0].clone();
+            mode_line = &lines[2];
+        }
+        let mode_char = mode_line.chars().nth(6).unwrap();
+        self.mode = match mode_char {
             'K' => Mode::Kernel,
             'U' => Mode::User,
-            _ => panic!(format!("Unexpected mode: {}", &mode_str)),
+            _ => panic!("Unexpected mode: '{}'\nLines read: {:#?}", mode_char, lines),
         };
-        Ok((mode, prog_out))
     }
 
-    fn _read_regs(xsm: &mut PtySession, regs: &mut XSMRegs) {
-        xsm.send_line("reg")
-            .expect("Couldn't send reg command to xsm");
-        let mut lines = Vec::new();
-        while let Ok(line) = xsm.read_line() {
-            lines.push(line);
-        }
-        xsm.exp_char('>')
-            .expect("reg: xsm didn't re-enter interactive debug mode.");
+    fn _read_regs(&mut self) {
+        writeln!(self.stdin, "reg").expect("Failed to send command to xsm");
+        let lines = self.get_stdout(7);
 
         fn ref_table(i: usize, regs: &mut XSMRegs) -> &mut String {
             if i < 20 {
@@ -205,29 +200,35 @@ impl XSM {
         }
 
         let mut i = 0;
-        for line in lines.into_iter() {
+        for line in lines {
             for word in line.split('\t') {
-                if word == "" {
+                if word == "\n" {
                     continue;
                 }
-                let mut it = word.split(": ");
-                it.next().unwrap();
-                let val = it.next().unwrap_or("").to_string();
-                *ref_table(i, regs) = val;
+                let val = word.split(": ").nth(1).unwrap();
+                let reg = ref_table(i, &mut self.regs);
+                reg.clear();
+                reg.push_str(val);
                 i += 1;
             }
         }
     }
 
-    fn _read_page_table(
-        xsm: &mut PtySession,
-        ptbr: &str,
-        ptlr: &str,
-    ) -> Result<Vec<XSMPageTableEntry>, XSMError> {
+    fn _read_page_table(&mut self) -> Vec<XSMPageTableEntry> {
+        let ptbr: usize = if let Ok(ptbr) = self.regs.ptbr.parse() {
+            ptbr
+        } else {
+            self.errors.push(XSMError::PTBRInvalid);
+            return Vec::new();
+        };
+        let ptlr: usize = if let Ok(ptlr) = self.regs.ptlr.parse() {
+            ptlr
+        } else {
+            self.errors.push(XSMError::PTLRInvalid);
+            return Vec::new();
+        };
         let mut page_table = Vec::new();
-        let ptbr: usize = ptbr.parse().map_err(|_| XSMError::PTBRInvalid)?;
-        let ptlr: usize = ptlr.parse().map_err(|_| XSMError::PTLRInvalid)?;
-        let page_table_str = Self::read_mem_range(xsm, ptbr, ptbr + ptlr * 2 - 1);
+        let page_table_str = self.read_mem_range(ptbr, ptbr + ptlr * 2 - 1);
         for entry_mem in page_table_str.chunks_exact(2) {
             let entry = XSMPageTableEntry {
                 phy: entry_mem[0].clone(),
@@ -235,7 +236,7 @@ impl XSM {
             };
             page_table.push(entry);
         }
-        Ok(page_table)
+        page_table
     }
     /// ------------ End of called by load state --------------- ///
 
@@ -247,16 +248,13 @@ impl XSM {
         (start_page, end_page, start_page_skip, end_page_take)
     }
 
-    fn _page_vir_to_phy(
-        page_table: &Vec<XSMPageTableEntry>,
-        vir_page: usize,
-    ) -> Result<usize, XSMInternalError> {
-        if vir_page > page_table.len() {
+    fn _page_vir_to_phy(&self, vir_page: usize) -> Result<usize, XSMInternalError> {
+        if vir_page > self.page_table.len() {
             return Err(XSMInternalError::VirtualMemoryOutOfBounds {
                 addr: vir_page * XSM_PAGE_LEN,
             });
         }
-        let page_table_entry = &page_table[vir_page];
+        let page_table_entry = &self.page_table[vir_page];
         match page_table_entry.phy.parse::<isize>() {
             Err(_) => Err(XSMInternalError::InvalidPageTableEntry {
                 index: vir_page,
@@ -280,13 +278,9 @@ impl XSM {
         }
     }
 
-    fn read_mem_page(xsm: &mut PtySession, page: usize) -> Vec<String> {
-        xsm.send_line(&format!("mem {}", page))
-            .expect("Failed writing to xsm");
-        // xsm.exp_string("Written to file mem.")
-        //     .expect("Failed getting `mem` response from xsm.");
-        xsm.exp_char('>')
-            .expect("mem: xsm didn't re-enter interactive debug mode.");
+    fn read_mem_page(&mut self, page: usize) -> Vec<String> {
+        writeln!(self.stdin, "mem {}", page).expect("Failed to send command to xsm");
+        let _buf = self.get_stdout(1);
         let mem: String = fs::read_to_string("mem").expect("Failed to read mem file.");
         mem.lines()
             .map(|l| {
@@ -298,51 +292,46 @@ impl XSM {
             .collect()
     }
 
-    fn read_mem_range(xsm: &mut PtySession, start_addr: usize, end_addr: usize) -> Vec<String> {
+    fn read_mem_range(&mut self, start_addr: usize, end_addr: usize) -> Vec<String> {
         let mut data = Vec::new();
         let (start_page, end_page, start_page_skip, end_page_take) =
             Self::_pageify(start_addr, end_addr);
         data.extend(
-            Self::read_mem_page(xsm, start_page)
+            self.read_mem_page(start_page)
                 .into_iter()
                 .skip(start_page_skip),
         );
         for i in start_page + 1..end_page {
-            data.extend(Self::read_mem_page(xsm, i).into_iter());
+            data.extend(self.read_mem_page(i).into_iter());
         }
         if end_page > start_page {
-            data.extend(
-                Self::read_mem_page(xsm, end_page)
-                    .into_iter()
-                    .take(end_page_take),
-            );
+            data.extend(self.read_mem_page(end_page).into_iter().take(end_page_take));
         }
         data
     }
 
     fn read_mem_range_vir(
-        xsm: &mut PtySession,
+        &mut self,
         start_addr: usize,
         end_addr: usize,
-        page_table: &Vec<XSMPageTableEntry>,
     ) -> Result<Vec<String>, XSMInternalError> {
         let mut data = Vec::new();
         let (start_page_vir, end_page_vir, start_page_skip, end_page_take) =
             Self::_pageify(start_addr, end_addr);
-        let start_page_phy = Self::_page_vir_to_phy(&page_table, start_page_vir)?;
+        let start_page_phy = self._page_vir_to_phy(start_page_vir)?;
         data.extend(
-            Self::read_mem_page(xsm, start_page_phy)
+            self.read_mem_page(start_page_phy)
                 .into_iter()
                 .skip(start_page_skip),
         );
         for page_vir in start_page_vir + 1..end_page_vir {
-            let page_phy = Self::_page_vir_to_phy(&page_table, page_vir)?;
-            data.extend(Self::read_mem_page(xsm, page_phy).into_iter());
+            let page_phy = self._page_vir_to_phy(page_vir)?;
+            data.extend(self.read_mem_page(page_phy).into_iter());
         }
         if end_page_vir > start_page_vir {
-            let end_page_phy = Self::_page_vir_to_phy(&page_table, end_page_vir)?;
+            let end_page_phy = self._page_vir_to_phy(end_page_vir)?;
             data.extend(
-                Self::read_mem_page(xsm, end_page_phy)
+                self.read_mem_page(end_page_phy)
                     .into_iter()
                     .take(end_page_take),
             );
@@ -398,31 +387,24 @@ impl XSM {
             .parse()
             .expect("IP is not an unsigned integer.");
 
-        // self.xsm.send_line("l");
-        // let mut lines = Vec::new();
-        // while let Ok(line) = self.xsm.read_line() {
-        //     let mut split = line.split('\t');
-        //     split.next().unwrap();
-        //     lines.push(split.next().unwrap().to_string());
-        // }
-        // (ip-20, ip, lines)
         let max_addr = max_lines * 2;
         let start;
         let code = if let Mode::User = self.mode {
+            dbg!(ip);
             let max_range = Self::get_valid_mem_range(ip, &self.page_table)
                 .expect("IP not found in page table.");
             let start_ = std::cmp::max(ip - max_addr / 2, max_range.0);
             start = start_ + (start_ % 2);
             let end_ = std::cmp::min(ip + max_addr - max_addr / 2, max_range.1);
             let end = end_ - (end_ % 2);
-            Self::read_mem_range_vir(&mut self.xsm, start, end, &self.page_table).unwrap()
+            self.read_mem_range_vir(start, end).unwrap()
         } else {
             let start_ = std::cmp::max(ip - max_addr / 2, 0);
             start = start_ + (start_ % 2);
             // FIXME
             let end_ = std::cmp::min(ip + max_addr - max_addr / 2, 99999);
             let end = end_ - (end_ % 2);
-            Self::read_mem_range(&mut self.xsm, start, end)
+            self.read_mem_range(start, end)
         };
         let code = code.chunks_exact(2).map(|c| c[0].clone() + &c[1]).collect();
         (start, ip, code)
@@ -430,15 +412,14 @@ impl XSM {
 
     /// If not halted returns (self, program output)
     pub fn step(&mut self) {
-        self.xsm.send_line("step").expect("Failed to send `step`.");
-        if let Some(rexpect::process::wait::WaitStatus::Exited(_, _)) = self.xsm.process.status() {
+        writeln!(self.stdin, "step").expect("Failed to send command to xsm");
+        if let Ok(Some(retcode)) = self.xsm.try_wait() {
+            eprintln!("Halted {}", retcode);
             self.halted = true;
-            let _ = Self::_read_status(&mut self.xsm).map(|(mode, output)| {
-                self.mode = mode;
-                self.output = output
-            });
+            self._read_status();
             return;
         }
-        self.load_state().expect("Failed to load state");
+        eprintln!("Load new state");
+        self.load_state();
     }
 }

@@ -1,9 +1,10 @@
-// use pancurses;
+#![allow(dead_code)]
 
 mod xsm;
 use xsm::XSM;
 
 mod ui;
+mod layout;
 
 static XSM_CMDLINE: &str = "xsm --disk-file disk.xfs --debug";
 
