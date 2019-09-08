@@ -139,21 +139,9 @@ impl XSM {
     /// Returns: Mode, Program output if there was an out instruction
     fn load_state(&mut self) {
         self.errors.clear();
-
-        eprintln!("Reading status");
-        let t = std::time::Instant::now();
         self._read_status();
-        eprintln!("Read status: {}", t.elapsed().as_millis());
-
-        eprintln!("Reading regs");
-        let t = std::time::Instant::now();
         self._read_regs();
-        eprintln!("Read regs: {}", t.elapsed().as_millis());
-
-        eprintln!("Reading page table");
-        let t = std::time::Instant::now();
         self._read_page_table();
-        eprintln!("Read page table: {}", t.elapsed().as_millis());
     }
 
     /// ------------ Called by load state --------------- ///
@@ -419,7 +407,6 @@ impl XSM {
             self._read_status();
             return;
         }
-        eprintln!("Load new state");
         self.load_state();
     }
 }
