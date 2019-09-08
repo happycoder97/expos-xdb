@@ -342,6 +342,14 @@ impl XSM {
         let mut data = Vec::new();
         let (start_page, end_page, start_page_skip, end_page_take) =
             Self::_pageify(start_addr, end_addr);
+        if start_page == end_page {
+            data.extend(
+                self.read_mem_page(start_page)
+                    .into_iter()
+                    .skip(start_page_skip)
+                    .take(end_page_take)
+            );
+        } else {
         data.extend(
             self.read_mem_page(start_page)
                 .into_iter()
@@ -350,7 +358,6 @@ impl XSM {
         for i in start_page + 1..end_page {
             data.extend(self.read_mem_page(i).into_iter());
         }
-        if end_page > start_page {
             data.extend(self.read_mem_page(end_page).into_iter().take(end_page_take));
         }
         data
