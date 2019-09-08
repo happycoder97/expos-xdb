@@ -123,6 +123,53 @@ impl XSM {
         Ok(xsm)
     }
 
+    /// If not halted returns (self, program output)
+    pub fn step(&mut self) {
+        writeln!(self.stdin, "step").expect("Failed to send command to xsm");
+        if let Ok(Some(retcode)) = self.xsm.try_wait() {
+            eprintln!("Halted {}", retcode);
+            self.halted = true;
+            self._read_status();
+            return;
+        }
+        self.load_state();
+    }
+
+    // Returns (base_addr, ip, code)
+    pub fn get_code(&mut self, max_lines: usize) -> (usize, usize, Vec<String>) {
+        let ip: usize = self
+            .regs
+            .ip
+            .parse()
+            .expect("IP is not an unsigned integer.");
+
+        let max_addr = max_lines * 2;
+        let start;
+        let code = if let Mode::User = self.mode {
+            dbg!(ip);
+            let max_range = Self::get_valid_mem_range(ip, &self.page_table)
+                .expect("IP not found in page table.");
+            let start_ = std::cmp::max(ip - max_addr / 2, max_range.0);
+            start = start_ + (start_ % 2);
+            let end_ = std::cmp::min(ip + max_addr - max_addr / 2, max_range.1);
+            let end = end_ - (end_ % 2);
+            self.read_mem_range_vir(start, end).unwrap()
+        } else {
+            let start_ = std::cmp::max(ip - max_addr / 2, 0);
+            start = start_ + (start_ % 2);
+            // FIXME
+            let end_ = std::cmp::min(ip + max_addr - max_addr / 2, 99999);
+            let end = end_ - (end_ % 2);
+            self.read_mem_range(start, end)
+        };
+        let code = code.chunks_exact(2).map(|c| c[0].clone() + &c[1]).collect();
+        (start, ip, code)
+    }
+
+    pub fn get_regs(&self) -> &XSMRegs {
+        &self.regs
+    }
+
     fn get_stdout(&mut self, lines: usize) -> Vec<String> {
         let mut vec = Vec::with_capacity(lines);
         for _ in 0..lines {
@@ -372,52 +419,5 @@ impl XSM {
             preceding_page * XSM_PAGE_LEN,
             succeeding_page * XSM_PAGE_LEN,
         ))
-    }
-
-    pub fn get_regs(&self) -> &XSMRegs {
-        &self.regs
-    }
-
-    // Returns (base_addr, ip, code)
-    pub fn get_code(&mut self, max_lines: usize) -> (usize, usize, Vec<String>) {
-        let ip: usize = self
-            .regs
-            .ip
-            .parse()
-            .expect("IP is not an unsigned integer.");
-
-        let max_addr = max_lines * 2;
-        let start;
-        let code = if let Mode::User = self.mode {
-            dbg!(ip);
-            let max_range = Self::get_valid_mem_range(ip, &self.page_table)
-                .expect("IP not found in page table.");
-            let start_ = std::cmp::max(ip - max_addr / 2, max_range.0);
-            start = start_ + (start_ % 2);
-            let end_ = std::cmp::min(ip + max_addr - max_addr / 2, max_range.1);
-            let end = end_ - (end_ % 2);
-            self.read_mem_range_vir(start, end).unwrap()
-        } else {
-            let start_ = std::cmp::max(ip - max_addr / 2, 0);
-            start = start_ + (start_ % 2);
-            // FIXME
-            let end_ = std::cmp::min(ip + max_addr - max_addr / 2, 99999);
-            let end = end_ - (end_ % 2);
-            self.read_mem_range(start, end)
-        };
-        let code = code.chunks_exact(2).map(|c| c[0].clone() + &c[1]).collect();
-        (start, ip, code)
-    }
-
-    /// If not halted returns (self, program output)
-    pub fn step(&mut self) {
-        writeln!(self.stdin, "step").expect("Failed to send command to xsm");
-        if let Ok(Some(retcode)) = self.xsm.try_wait() {
-            eprintln!("Halted {}", retcode);
-            self.halted = true;
-            self._read_status();
-            return;
-        }
-        self.load_state();
     }
 }
