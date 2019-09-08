@@ -60,13 +60,15 @@ impl UI {
         let lines = window.get_remaining_lines() as usize;
         let (base, ip, code_lines) = self.xsm.get_code(lines);
         for (i, code) in code_lines.iter().enumerate() {
-            if base + i == ip {
+            let instr_addr = base + 2 * i;
+            if instr_addr == ip {
                 window.get_window().color_set(ColorPairs::Selected as i16);
-            }
-            window.text_no_nl(format!("{}: ", base + 2 * i));
+                window.text_no_nl(format!("{}: ", instr_addr));
                 window.text(code);
-            if base + i == ip {
                 window.get_window().color_set(ColorPairs::Normal as i16);
+            } else {
+                window.text_no_nl(format!("{}: ", instr_addr));
+                window.text(code);
             }
         }
         window.render();
