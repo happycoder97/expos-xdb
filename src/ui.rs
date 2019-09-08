@@ -10,7 +10,11 @@ pub struct UI {
     stdscr: Window,
     xsm: XSM,
     window_code: VBox,
-    window_regs: VBox,
+    window_regs1: VBox,
+    window_regs2: VBox,
+    window_page_table: VBox,
+    window_status_output: VBox,
+    window_errors: VBox,
 }
 
 enum ColorPairs {
@@ -30,7 +34,12 @@ impl UI {
 
         let (lines, _cols) = stdscr.get_max_yx();
         let window_code = pancurses::newwin(lines, 30, 0, 0);
-        let window_regs = pancurses::newwin(lines, 30, 0, 30);
+        let window_regs1 = pancurses::newwin(30, 30, 0, 30);
+        let window_regs2 = pancurses::newwin(30, 30, 0, 60);
+        let window_page_table = pancurses::newwin(lines, 30, 0, 90);
+        let window_status_output = pancurses::newwin(lines-30, 60, 30, 30);
+
+        let window_errors = pancurses::newwin(30, 60, 0, 120);
 
         pancurses::init_pair(
             ColorPairs::Normal as i16,
@@ -47,7 +56,11 @@ impl UI {
             stdscr,
             xsm,
             window_code: VBox::new(window_code, 2),
-            window_regs: VBox::new(window_regs, 2),
+            window_regs1: VBox::new(window_regs1, 2),
+            window_regs2: VBox::new(window_regs2, 2),
+            window_page_table: VBox::new(window_page_table, 2),
+            window_status_output: VBox::new(window_status_output, 2),
+            window_errors: VBox::new(window_errors, 2),
         }
     }
 
@@ -74,8 +87,8 @@ impl UI {
         window.render();
     }
 
-    fn render_regs(&mut self) {
-        let window = &mut self.window_regs;
+    fn render_regs1(&mut self) {
+        let window = &mut self.window_regs1;
         window.clear();
 
         window.text("REGISTERS");
@@ -89,8 +102,83 @@ impl UI {
             window.text(format!("R{}: {}", i, &self.xsm.get_regs().r[i]));
         }
 
+        window.render();
+    }
+
+    fn render_regs2(&mut self) {
+        let window = &mut self.window_regs2;
+        window.clear();
+
+        window.hline();
+        window.text("PORTS");
+        window.hline();
+
         for i in 0..4usize {
             window.text(format!("P{}: {}", i, &self.xsm.get_regs().p[i]));
+        }
+
+        window.hline();
+        window.text("STACK");
+        window.hline();
+        window.text(format!("BP: {}", &self.xsm.get_regs().bp));
+        window.text(format!("SP: {}", &self.xsm.get_regs().sp));
+
+        window.hline();
+        window.text("PAGE TABLE");
+        window.hline();
+        window.text(format!("PTBR: {}", &self.xsm.get_regs().ptbr));
+        window.text(format!("PTLR: {}", &self.xsm.get_regs().ptlr));
+
+        window.hline();
+        window.text("OTHERS");
+        window.hline();
+        window.text(format!("IP: {}", &self.xsm.get_regs().ip));
+        window.text(format!("EIP: {}", &self.xsm.get_regs().eip));
+        window.text(format!("EC: {}", &self.xsm.get_regs().ec));
+        window.text(format!("EPN: {}", &self.xsm.get_regs().epn));
+        window.text(format!("EMA: {}", &self.xsm.get_regs().epn));
+
+        window.render();
+    }
+
+    fn render_page_table(&mut self) {
+        let window = &mut self.window_page_table;
+        window.clear();
+
+        window.text("PAGE TABLE");
+        window.hline();
+
+        for (i, entry) in self.xsm.get_page_table().iter().enumerate() {
+            window.text(format!("{} -> {}    [{}]", i, entry.phy, entry.aux))
+        }
+        window.render();
+    }
+
+    fn render_errors(&mut self) {
+        let window = &mut self.window_errors;
+        window.clear();
+
+        window.text("ERRORS");
+        window.hline();
+
+        for error in self.xsm.get_errors() {
+            window.text(format!("{:#?}", error))
+        }
+        window.render();
+    }
+
+    fn render_status_output(&mut self) {
+        let window = &mut self.window_status_output;
+        window.clear();
+
+        window.text("OUTPUT");
+        window.hline();
+        window.text(self.xsm.get_output());
+        window.hline();
+        window.text("STATUS");
+        window.hline();
+        for line in self.xsm.get_status().lines() {
+            window.text(line);
         }
         window.render();
     }
@@ -98,7 +186,11 @@ impl UI {
     pub fn render_loop(&mut self) {
         for _ in 0..1000 {
             self.render_code();
-            self.render_regs();
+            self.render_regs1();
+            self.render_regs2();
+            self.render_page_table();
+            self.render_errors();
+            self.render_status_output();
             self.xsm.step();
             thread::sleep(Duration::from_millis(500));
             // let ch: pancurses::Input = self.stdscr.getch().unwrap();

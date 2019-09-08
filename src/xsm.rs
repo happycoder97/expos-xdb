@@ -48,8 +48,8 @@ enum XSMInternalError {
 
 #[derive(Debug, Clone)]
 pub struct XSMPageTableEntry {
-    phy: String,
-    aux: String,
+    pub phy: String,
+    pub aux: String,
 }
 
 #[derive(Debug)]
@@ -146,7 +146,6 @@ impl XSM {
         let max_addr = max_lines * 2;
         let start;
         let code = if let Mode::User = self.mode {
-            dbg!(ip);
             let max_range = Self::get_valid_mem_range(ip, &self.page_table)
                 .expect("IP not found in page table.");
             let start_ = std::cmp::max(ip - max_addr / 2, max_range.0);
@@ -168,6 +167,22 @@ impl XSM {
 
     pub fn get_regs(&self) -> &XSMRegs {
         &self.regs
+    }
+
+    pub fn get_page_table(&self) -> &Vec<XSMPageTableEntry> {
+        &self.page_table
+    }
+
+    pub fn get_errors(&self) -> &Vec<XSMError> {
+        &self.errors
+    }
+
+    pub fn get_output(&self) -> &str {
+        &self.output
+    }
+
+    pub fn get_status(&self) -> &str {
+        &self.status
     }
 
     fn get_stdout(&mut self, lines: usize) -> Vec<String> {
@@ -199,7 +214,6 @@ impl XSM {
             self.status.clear();
             for line in lines.iter() {
                 self.status += line;
-                self.status += "\n";
             }
             mode_line = &lines[1];
         } else {
@@ -207,7 +221,6 @@ impl XSM {
             self.status.clear();
             for line in lines.iter().skip(1) {
                 self.status += line;
-                self.status += "\n";
             }
             self.output.clear();
             self.output += &lines[0];
@@ -260,29 +273,28 @@ impl XSM {
         }
     }
 
-    fn _read_page_table(&mut self) -> Vec<XSMPageTableEntry> {
+    fn _read_page_table(&mut self) {
+        self.page_table.clear();
         let ptbr: usize = if let Ok(ptbr) = self.regs.ptbr.parse() {
             ptbr
         } else {
             self.errors.push(XSMError::PTBRInvalid);
-            return Vec::new();
+            return;
         };
         let ptlr: usize = if let Ok(ptlr) = self.regs.ptlr.parse() {
             ptlr
         } else {
             self.errors.push(XSMError::PTLRInvalid);
-            return Vec::new();
+            return;
         };
-        let mut page_table = Vec::new();
-        let page_table_str = self.read_mem_range(ptbr, ptbr + ptlr * 2 - 1);
+        let page_table_str = self.read_mem_range(ptbr, ptbr + ptlr * 2);
         for entry_mem in page_table_str.chunks_exact(2) {
             let entry = XSMPageTableEntry {
                 phy: entry_mem[0].clone(),
                 aux: entry_mem[1].clone(),
             };
-            page_table.push(entry);
+            self.page_table.push(entry);
         }
-        page_table
     }
     /// ------------ End of called by load state --------------- ///
 
@@ -347,17 +359,17 @@ impl XSM {
                 self.read_mem_page(start_page)
                     .into_iter()
                     .skip(start_page_skip)
-                    .take(end_page_take)
+                    .take(end_page_take),
             );
         } else {
-        data.extend(
-            self.read_mem_page(start_page)
-                .into_iter()
-                .skip(start_page_skip),
-        );
-        for i in start_page + 1..end_page {
-            data.extend(self.read_mem_page(i).into_iter());
-        }
+            data.extend(
+                self.read_mem_page(start_page)
+                    .into_iter()
+                    .skip(start_page_skip),
+            );
+            for i in start_page + 1..end_page {
+                data.extend(self.read_mem_page(i).into_iter());
+            }
             data.extend(self.read_mem_page(end_page).into_iter().take(end_page_take));
         }
         data
@@ -380,15 +392,15 @@ impl XSM {
                     .take(end_page_take),
             );
         } else {
-        data.extend(
-            self.read_mem_page(start_page_phy)
-                .into_iter()
-                .skip(start_page_skip),
-        );
-        for page_vir in start_page_vir + 1..end_page_vir {
-            let page_phy = self._page_vir_to_phy(page_vir)?;
-            data.extend(self.read_mem_page(page_phy).into_iter());
-        }
+            data.extend(
+                self.read_mem_page(start_page_phy)
+                    .into_iter()
+                    .skip(start_page_skip),
+            );
+            for page_vir in start_page_vir + 1..end_page_vir {
+                let page_phy = self._page_vir_to_phy(page_vir)?;
+                data.extend(self.read_mem_page(page_phy).into_iter());
+            }
             let end_page_phy = self._page_vir_to_phy(end_page_vir)?;
             data.extend(
                 self.read_mem_page(end_page_phy)
