@@ -15,7 +15,7 @@ pub struct XSM {
     errors: Vec<XSMError>,
     output: String,
     halted: bool,
-    step_output: String,
+    status: String,
 }
 
 #[derive(Debug)]
@@ -116,7 +116,7 @@ impl XSM {
             errors: Vec::new(),
             output: String::new(),
             halted: false,
-            step_output: String::new(),
+            status: String::new(),
         };
 
         xsm.load_state();
@@ -149,10 +149,21 @@ impl XSM {
         let mut lines = self.get_stdout(3);
         let mode_line;
         if lines[0].starts_with("debug>") || lines[0].starts_with("Previous instruction at IP =") {
+            self.status.clear();
+            for line in lines.iter() {
+                self.status += line;
+                self.status += "\n";
+            }
             mode_line = &lines[1];
         } else {
             lines.extend(self.get_stdout(1).into_iter());
-            self.output = lines[0].clone();
+            self.status.clear();
+            for line in lines.iter().skip(1) {
+                self.status += line;
+                self.status += "\n";
+            }
+            self.output.clear();
+            self.output += &lines[0];
             mode_line = &lines[2];
         }
         let mode_char = mode_line.chars().nth(6).unwrap();
