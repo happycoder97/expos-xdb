@@ -372,6 +372,14 @@ impl XSM {
         let (start_page_vir, end_page_vir, start_page_skip, end_page_take) =
             Self::_pageify(start_addr, end_addr);
         let start_page_phy = self._page_vir_to_phy(start_page_vir)?;
+        if start_page_vir == end_page_vir {
+            data.extend(
+                self.read_mem_page(start_page_phy)
+                    .into_iter()
+                    .skip(start_page_skip)
+                    .take(end_page_take),
+            );
+        } else {
         data.extend(
             self.read_mem_page(start_page_phy)
                 .into_iter()
@@ -381,7 +389,6 @@ impl XSM {
             let page_phy = self._page_vir_to_phy(page_vir)?;
             data.extend(self.read_mem_page(page_phy).into_iter());
         }
-        if end_page_vir > start_page_vir {
             let end_page_phy = self._page_vir_to_phy(end_page_vir)?;
             data.extend(
                 self.read_mem_page(end_page_phy)
