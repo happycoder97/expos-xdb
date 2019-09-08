@@ -1,7 +1,7 @@
 use pancurses;
 use pancurses::Window;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::layout::VBox;
 use crate::xsm::XSM;
@@ -64,7 +64,7 @@ impl UI {
                 window.get_window().color_set(ColorPairs::Selected as i16);
             }
             window.text_no_nl(format!("{}: ", base + 2 * i));
-            window.text(code);
+                window.text(code);
             if base + i == ip {
                 window.get_window().color_set(ColorPairs::Normal as i16);
             }
@@ -95,14 +95,9 @@ impl UI {
 
     pub fn render_loop(&mut self) {
         for _ in 0..1000 {
-            eprintln!("----");
-            let t = Instant::now();
             self.render_code();
             self.render_regs();
-            eprintln!("Render code: {}", t.elapsed().as_millis());
-            let t = Instant::now();
             self.xsm.step();
-            eprintln!("Step: {}", t.elapsed().as_millis());
             thread::sleep(Duration::from_millis(500));
             // let ch: pancurses::Input = self.stdscr.getch().unwrap();
             // if ch == pancurses::Input::Character('s') {
