@@ -1,21 +1,19 @@
 #![allow(dead_code)]
 
+#[macro_use]
+extern crate imgui;
+
 mod xsm;
 use xsm::XSM;
 
 mod ui;
-mod layout;
-mod theme;
+mod ui_support;
 
 static XSM_CMDLINE: &str = "xsm --disk-file disk.xfs --debug --timer 100";
 
 fn main() {
-    let std_panic_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |panic_info| {
-        pancurses::endwin();
-        std_panic_hook(panic_info);
-    }));
     let xsm = XSM::spawn_new(XSM_CMDLINE).expect("Error loading xsm");
-    let mut ui = ui::UI::new(xsm);
-    ui.render_loop();
+    let mut xsm_ui = ui::UI::new(xsm);
+    let sys = ui_support::init("XDB - Visual Debugger for eXpOS");
+    sys.main_loop(|_, ui| {xsm_ui.render_all(ui)});
 }

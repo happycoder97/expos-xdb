@@ -7,4 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-pancurses = "*"
+clipboard = "0.5"
+glium = { version = "0.25", default-features = true }
+imgui = { version = "0.2.0"}
+imgui-glium-renderer = { version = "0.2.0"}
+imgui-winit-support = { version = "0.2.0"}
