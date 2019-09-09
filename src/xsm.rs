@@ -13,7 +13,7 @@ pub struct XSM {
     regs: XSMRegs,
     page_table: Vec<XSMPageTableEntry>,
     errors: Vec<XSMError>,
-    output: String,
+    output: Vec<String>,
     halted: bool,
     status: String,
 }
@@ -114,7 +114,7 @@ impl XSM {
             regs: XSMRegs::default(),
             page_table: Vec::new(),
             errors: Vec::new(),
-            output: String::new(),
+            output: Vec::new(),
             halted: false,
             status: String::new(),
         };
@@ -124,8 +124,8 @@ impl XSM {
     }
 
     /// If not halted returns (self, program output)
-    pub fn step(&mut self) {
-        writeln!(self.stdin, "step").expect("Failed to send command to xsm");
+    pub fn step(&mut self, n: usize) {
+        writeln!(self.stdin, "step {}", n).expect("Failed to send command to xsm");
         if let Ok(Some(retcode)) = self.xsm.try_wait() {
             eprintln!("Halted {}", retcode);
             self.halted = true;
@@ -133,6 +133,10 @@ impl XSM {
             return;
         }
         self.load_state();
+    }
+
+    pub fn is_halted(&self) -> bool {
+        self.halted
     }
 
     // Returns (base_addr, ip, code)
@@ -148,13 +152,16 @@ impl XSM {
         let code = if let Mode::User = self.mode {
             let max_range = Self::get_valid_mem_range(ip, &self.page_table)
                 .expect("IP not found in page table.");
-            let start_ = std::cmp::max(ip - max_addr / 2, max_range.0);
+            let start_ = std::cmp::max(
+                ip as isize - max_addr as isize / 2,
+                max_range.0 as isize,
+            ) as usize;
             start = start_ + (start_ % 2);
             let end_ = std::cmp::min(ip + max_addr - max_addr / 2, max_range.1);
             let end = end_ - (end_ % 2);
             self.read_mem_range_vir(start, end).unwrap()
         } else {
-            let start_ = std::cmp::max(ip - max_addr / 2, 0);
+            let start_ = std::cmp::max(ip as isize - max_addr as isize/ 2, 0) as usize;
             start = start_ + (start_ % 2);
             // FIXME
             let end_ = std::cmp::min(ip + max_addr - max_addr / 2, 99999);
@@ -177,7 +184,7 @@ impl XSM {
         &self.errors
     }
 
-    pub fn get_output(&self) -> &str {
+    pub fn get_output(&self) -> &Vec<String> {
         &self.output
     }
 
@@ -210,7 +217,10 @@ impl XSM {
     fn _read_status(&mut self) {
         let mut lines = self.get_stdout(3);
         let mode_line;
-        if lines[0].starts_with("debug>") || lines[0].starts_with("Previous instruction at IP =") {
+        if lines[0]
+            .trim_start_matches("debug> ")
+            .starts_with("Previous instruction at IP =")
+        {
             self.status.clear();
             for line in lines.iter() {
                 self.status += line;
@@ -222,8 +232,8 @@ impl XSM {
             for line in lines.iter().skip(1) {
                 self.status += line;
             }
-            self.output.clear();
-            self.output += &lines[0];
+            self.output
+                .push(lines[0].trim_start_matches("debug> ").to_owned());
             mode_line = &lines[2];
         }
         let mode_char = mode_line.chars().nth(6).unwrap();

@@ -1,3 +1,4 @@
+use crate::theme;
 use pancurses::Window;
 
 pub struct VBox {
@@ -5,6 +6,7 @@ pub struct VBox {
     col: i32,
     line: i32,
     padding: i32,
+    focused: bool,
 }
 
 impl VBox {
@@ -14,6 +16,7 @@ impl VBox {
             line: 0,
             col: 0,
             padding,
+            focused: false,
         }
     }
 
@@ -54,13 +57,23 @@ impl VBox {
     }
 
     pub fn clear(&mut self) {
-        self.line = 1;  // border
-        self.col = 1;   // border
+        self.line = 1; // border
+        self.col = 1; // border
         self.window.clear();
     }
 
+    pub fn set_focused(&mut self, focused: bool) {
+        self.focused = focused;
+    }
+
     pub fn render(&self) {
-        self.window.draw_box(0, 0);
+        if self.focused {
+            self.window.color_set(theme::ColorPair::Selected as _);
+            self.window.draw_box(0, 0);
+            self.window.color_set(theme::ColorPair::Normal as _);
+        } else {
+            self.window.draw_box(0, 0);
+        }
         self.window.refresh();
     }
 

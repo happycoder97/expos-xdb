@@ -5,8 +5,9 @@ use xsm::XSM;
 
 mod ui;
 mod layout;
+mod theme;
 
-static XSM_CMDLINE: &str = "xsm --disk-file disk.xfs --debug";
+static XSM_CMDLINE: &str = "xsm --disk-file disk.xfs --debug --timer 100";
 
 fn main() {
     let std_panic_hook = std::panic::take_hook();

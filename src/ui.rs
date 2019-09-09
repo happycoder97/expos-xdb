@@ -4,6 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::layout::VBox;
+use crate::theme;
 use crate::xsm::XSM;
 
 pub struct UI {
@@ -13,13 +14,8 @@ pub struct UI {
     window_regs1: VBox,
     window_regs2: VBox,
     window_page_table: VBox,
-    window_status_output: VBox,
+    window_output: VBox,
     window_errors: VBox,
-}
-
-enum ColorPairs {
-    Normal = 0,
-    Selected = 1,
 }
 
 impl UI {
@@ -32,25 +28,15 @@ impl UI {
         stdscr.clear();
         stdscr.refresh();
 
+        theme::init();
+
         let (lines, _cols) = stdscr.get_max_yx();
         let window_code = pancurses::newwin(lines, 30, 0, 0);
         let window_regs1 = pancurses::newwin(30, 30, 0, 30);
         let window_regs2 = pancurses::newwin(30, 30, 0, 60);
-        let window_page_table = pancurses::newwin(lines, 30, 0, 90);
-        let window_status_output = pancurses::newwin(lines-30, 60, 30, 30);
-
+        let window_page_table = pancurses::newwin(30, 30, 0, 90);
+        let window_output = pancurses::newwin(lines - 30, 60, 30, 30);
         let window_errors = pancurses::newwin(30, 60, 0, 120);
-
-        pancurses::init_pair(
-            ColorPairs::Normal as i16,
-            pancurses::COLOR_WHITE,
-            pancurses::COLOR_BLACK,
-        );
-        pancurses::init_pair(
-            ColorPairs::Selected as i16,
-            pancurses::COLOR_BLACK,
-            pancurses::COLOR_WHITE,
-        );
 
         Self {
             stdscr,
@@ -59,7 +45,7 @@ impl UI {
             window_regs1: VBox::new(window_regs1, 2),
             window_regs2: VBox::new(window_regs2, 2),
             window_page_table: VBox::new(window_page_table, 2),
-            window_status_output: VBox::new(window_status_output, 2),
+            window_output: VBox::new(window_output, 2),
             window_errors: VBox::new(window_errors, 2),
         }
     }
@@ -75,10 +61,14 @@ impl UI {
         for (i, code) in code_lines.iter().enumerate() {
             let instr_addr = base + 2 * i;
             if instr_addr == ip {
-                window.get_window().color_set(ColorPairs::Selected as i16);
+                window
+                    .get_window()
+                    .color_set(theme::ColorPair::Selected as i16);
                 window.text_no_nl(format!("{}: ", instr_addr));
                 window.text(code);
-                window.get_window().color_set(ColorPairs::Normal as i16);
+                window
+                    .get_window()
+                    .color_set(theme::ColorPair::Normal as i16);
             } else {
                 window.text_no_nl(format!("{}: ", instr_addr));
                 window.text(code);
@@ -167,38 +157,42 @@ impl UI {
         window.render();
     }
 
-    fn render_status_output(&mut self) {
-        let window = &mut self.window_status_output;
+    fn render_output(&mut self) {
+        let window = &mut self.window_output;
         window.clear();
 
         window.text("OUTPUT");
         window.hline();
-        window.text(self.xsm.get_output());
-        window.hline();
-        window.text("STATUS");
-        window.hline();
-        for line in self.xsm.get_status().lines() {
-            window.text(line);
+        for line in self.xsm.get_output() {
+            window.text(&line);
         }
         window.render();
     }
 
+    fn render_all(&mut self) {
+        self.render_code();
+        self.render_regs1();
+        self.render_regs2();
+        self.render_page_table();
+        self.render_errors();
+        self.render_output();
+    }
+
     pub fn render_loop(&mut self) {
-        for _ in 0..1000 {
-            self.render_code();
-            self.render_regs1();
-            self.render_regs2();
-            self.render_page_table();
-            self.render_errors();
-            self.render_status_output();
-            self.xsm.step();
-            thread::sleep(Duration::from_millis(500));
+        let mut i = 0;
+        while !self.xsm.is_halted() {
+            i += 20;
+            self.xsm.step(20);
+            self.render_all();
+            thread::sleep(Duration::from_millis(100));
             // let ch: pancurses::Input = self.stdscr.getch().unwrap();
             // if ch == pancurses::Input::Character('s') {
             // } else {
             //     panic!("Testing panic");
             // }
         }
+        self.render_all();
+        self.stdscr.getch();
         self.exit()
     }
 
