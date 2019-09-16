@@ -401,8 +401,8 @@ impl XSM {
             data.extend(
                 self.read_mem_page(start_page)
                     .into_iter()
+                    .take(end_page_take)
                     .skip(start_page_skip)
-                    .take(end_page_take),
             );
         } else {
             data.extend(
@@ -431,8 +431,8 @@ impl XSM {
             data.extend(
                 self.read_mem_page(start_page_phy)
                     .into_iter()
+                    .take(end_page_take)
                     .skip(start_page_skip)
-                    .take(end_page_take),
             );
         } else {
             data.extend(
