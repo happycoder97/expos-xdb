@@ -1,6 +1,8 @@
 use std::fs;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command};
+use std::thread::sleep;
+use std::time::Duration;
 
 const XSM_PAGE_LEN: usize = 512;
 
@@ -93,7 +95,7 @@ impl Default for XSMRegs {
 }
 
 impl XSM {
-    pub fn spawn_new(command: &str) -> io::Result<XSM> {
+    pub fn spawn_new(command: &str) -> Result<XSM, ()> {
         let mut stdbuf_args = vec!["--output=L"];
         stdbuf_args.extend(command.split_whitespace());
 
@@ -101,7 +103,9 @@ impl XSM {
             .args(&stdbuf_args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .spawn()?;
+            .spawn().map_err(|_| {
+            println!("Error: Failed to launch command.");
+        })?;
 
         let stdout = xsm_process.stdout.take().expect("Failed to get stdout");
         let stdin = xsm_process.stdin.take().expect("Failed to get stdin");
@@ -122,8 +126,16 @@ impl XSM {
             last_code: (0, 0, Vec::new()),
         };
 
-        xsm.load_state();
-        Ok(xsm)
+        sleep(Duration::from_millis(200));
+        if xsm.xsm.try_wait().transpose().is_some() {
+            xsm.halted = true;
+            println!("Error: xsm exited without entering debug mode.");
+            println!("Please check your command line");
+            Err(())
+        } else {
+            xsm.load_state();
+            Ok(xsm)
+        }
     }
 
     /// If not halted returns (self, program output)
