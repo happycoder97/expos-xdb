@@ -30,7 +30,7 @@ pub fn init(title: &str) -> System {
         Display::new(builder, context, &events_loop).expect("Failed to initialize display");
 
     let mut imgui = Context::create();
-    imgui.set_ini_filename(None);
+    imgui.set_ini_filename(Some(std::path::PathBuf::from("xdb.ini")));
 
     if let Some(backend) = clipboard::init() {
         imgui.set_clipboard_backend(Box::new(backend));
