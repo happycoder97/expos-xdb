@@ -13,6 +13,7 @@ pub struct XSM {
     page_table: Vec<XSMPageTableEntry>,
     errors: Vec<String>,
     output: Vec<String>,
+    is_next_halt: bool,
     halted: bool,
     status: String,
     last_code: (usize, usize, Vec<String>),
@@ -115,6 +116,7 @@ impl XSM {
             page_table: Vec::new(),
             errors: Vec::new(),
             output: Vec::new(),
+            is_next_halt: false,
             halted: false,
             status: String::new(),
             last_code: (0, 0, Vec::new()),
@@ -138,6 +140,10 @@ impl XSM {
 
     pub fn is_halted(&self) -> bool {
         self.halted
+    }
+
+    pub fn is_next_halt(&self) -> bool {
+        self.is_next_halt
     }
 
     // Returns (base_addr, ip, code)
@@ -180,6 +186,7 @@ impl XSM {
             self.read_mem_range(start, end)
         };
         let code = code.chunks_exact(2).map(|c| c[0].clone() + &c[1]).collect();
+
         (start, ip, code)
     }
 
@@ -219,6 +226,9 @@ impl XSM {
     /// Returns: Mode, Program output if there was an out instruction
     fn load_state(&mut self) {
         self._read_status();
+        if self.is_halted() {
+            return;
+        }
         self._read_regs();
         self._read_page_table();
     }
@@ -226,6 +236,13 @@ impl XSM {
     /// ------------ Called by load state --------------- ///
     fn _read_status(&mut self) {
         let mut lines = self.get_stdout(3);
+        if lines[0]
+            .trim_start_matches("debug> ")
+            .starts_with("Machine is halting.") {
+            self.halted = true;
+            return;
+        }
+
         let mode_line;
         if lines[0]
             .trim_start_matches("debug> ")
@@ -233,6 +250,9 @@ impl XSM {
         {
             self.status.clear();
             for line in lines.iter() {
+                if line.starts_with("Next instruction") {
+                    self.is_next_halt = line.split(": ").last().unwrap().starts_with("HALT");
+                }
                 self.status += line;
             }
             mode_line = &lines[1];
@@ -240,6 +260,9 @@ impl XSM {
             lines.extend(self.get_stdout(1).into_iter());
             self.status.clear();
             for line in lines.iter().skip(1) {
+                if line.starts_with("Next instruction") {
+                    self.is_next_halt = line.split(": ").last().unwrap().starts_with("HALT");
+                }
                 self.status += line;
             }
             self.output
