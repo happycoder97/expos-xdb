@@ -33,10 +33,10 @@ impl UI {
                 for (i, code) in code_lines.iter().enumerate() {
                     let instr_addr = base + 2 * i;
                     if instr_addr == ip {
-                        imgui::MenuItem::new(&im_str!("{}: {} ---- (IP)", instr_addr, code))
+                        imgui::MenuItem::new(&im_str!("[{}]: {}", instr_addr, code))
                             .build(ui);
                     } else {
-                        imgui::MenuItem::new(&im_str!("{}: {}", instr_addr, code)).build(ui);
+                        imgui::MenuItem::new(&im_str!(" {} : {}", instr_addr, code)).build(ui);
                     }
                 }
             });
