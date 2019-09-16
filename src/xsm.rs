@@ -148,13 +148,10 @@ impl XSM {
 
     // Returns (base_addr, ip, code)
     pub fn get_code(&mut self, max_lines: usize) -> (usize, usize, Vec<String>) {
-        let ip: usize = match self
-            .regs
-            .ip
-            .parse() {
+        let ip: usize = match self.regs.ip.parse() {
             Ok(ip) => ip,
             Err(_) => {
-//                .expect("IP is not an unsigned integer.");
+                //                .expect("IP is not an unsigned integer.");
                 self.errors.push("IP is not an unsigned number".to_owned());
                 return self.last_code.clone();
             }
@@ -163,20 +160,22 @@ impl XSM {
         let max_addr = max_lines * 2;
         let start;
         let code = if let Mode::User = self.mode {
-            let max_range =
-                match Self::get_valid_mem_range(ip, &self.page_table) {
-                    Ok(r) => r,
-                    Err((ip, page)) => {
-                        self.errors.push(format!("IP: {}, Page: {} not found in page table", ip, page));
-                        return self.last_code.clone();
-                    }
-                };
+            let max_range = match Self::get_valid_mem_range(ip, &self.page_table) {
+                Ok(r) => r,
+                Err((ip, page)) => {
+                    self.errors.push(format!(
+                        "IP: {}, Page: {} not found in page table",
+                        ip, page
+                    ));
+                    return self.last_code.clone();
+                }
+            };
             let start_ =
                 std::cmp::max(ip as isize - max_addr as isize / 2, max_range.0 as isize) as usize;
             start = start_ + (start_ % 2);
             let end_ = std::cmp::min(ip + max_addr - max_addr / 2, max_range.1);
             let end = end_ - (end_ % 2);
-            self.read_mem_range_vir(start, end).unwrap()
+            self.read_mem_range_vir(start, end)
         } else {
             let start_ = std::cmp::max(ip as isize - max_addr as isize / 2, 0) as usize;
             start = start_ + (start_ % 2);
@@ -238,7 +237,8 @@ impl XSM {
         let mut lines = self.get_stdout(3);
         if lines[0]
             .trim_start_matches("debug> ")
-            .starts_with("Machine is halting.") {
+            .starts_with("Machine is halting.")
+        {
             self.halted = true;
             return;
         }
@@ -321,13 +321,15 @@ impl XSM {
         let ptbr: usize = if let Ok(ptbr) = self.regs.ptbr.parse() {
             ptbr
         } else {
-            self.errors.push(format!("PTBR: '{}' is invalid", self.regs.ptbr));
+            self.errors
+                .push(format!("PTBR: '{}' is invalid", self.regs.ptbr));
             return;
         };
         let ptlr: usize = if let Ok(ptlr) = self.regs.ptlr.parse() {
             ptlr
         } else {
-            self.errors.push(format!("PTLR: '{}' is invalid", self.regs.ptlr));
+            self.errors
+                .push(format!("PTLR: '{}' is invalid", self.regs.ptlr));
             return;
         };
         let page_table_str = self.read_mem_range(ptbr, ptbr + ptlr * 2);
@@ -393,7 +395,7 @@ impl XSM {
             .collect()
     }
 
-    fn read_mem_range(&mut self, start_addr: usize, end_addr: usize) -> Vec<String> {
+    pub fn read_mem_range(&mut self, start_addr: usize, end_addr: usize) -> Vec<String> {
         let mut data = Vec::new();
         let (start_page, end_page, start_page_skip, end_page_take) =
             Self::_pageify(start_addr, end_addr);
@@ -402,7 +404,7 @@ impl XSM {
                 self.read_mem_page(start_page)
                     .into_iter()
                     .take(end_page_take)
-                    .skip(start_page_skip)
+                    .skip(start_page_skip),
             );
         } else {
             data.extend(
@@ -418,21 +420,21 @@ impl XSM {
         data
     }
 
-    fn read_mem_range_vir(
+    pub fn read_mem_range_vir(
         &mut self,
         start_addr: usize,
         end_addr: usize,
-    ) -> Result<Vec<String>, XSMInternalError> {
+    ) -> Vec<String> {
         let mut data = Vec::new();
         let (start_page_vir, end_page_vir, start_page_skip, end_page_take) =
             Self::_pageify(start_addr, end_addr);
-        let start_page_phy = self._page_vir_to_phy(start_page_vir)?;
+        let start_page_phy = try_or!(self._page_vir_to_phy(start_page_vir), Vec::new());
         if start_page_vir == end_page_vir {
             data.extend(
                 self.read_mem_page(start_page_phy)
                     .into_iter()
                     .take(end_page_take)
-                    .skip(start_page_skip)
+                    .skip(start_page_skip),
             );
         } else {
             data.extend(
@@ -441,17 +443,17 @@ impl XSM {
                     .skip(start_page_skip),
             );
             for page_vir in start_page_vir + 1..end_page_vir {
-                let page_phy = self._page_vir_to_phy(page_vir)?;
+                let page_phy = try_or!(self._page_vir_to_phy(page_vir), Vec::new());
                 data.extend(self.read_mem_page(page_phy).into_iter());
             }
-            let end_page_phy = self._page_vir_to_phy(end_page_vir)?;
+            let end_page_phy = try_or!(self._page_vir_to_phy(end_page_vir), Vec::new());
             data.extend(
                 self.read_mem_page(end_page_phy)
                     .into_iter()
                     .take(end_page_take),
             );
         }
-        Ok(data)
+        data
     }
 
     /// Return Ok(start_range, end_range) or Err(IP, Page)

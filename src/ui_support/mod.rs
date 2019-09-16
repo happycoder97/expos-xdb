@@ -1,5 +1,5 @@
-use glium::{Display, Surface};
 use glium::glutin::{self, Event, WindowEvent};
+use glium::{Display, Surface};
 use imgui::{Context, FontConfig, FontSource, Ui};
 use imgui_glium_renderer::Renderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};

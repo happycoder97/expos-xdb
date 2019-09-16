@@ -12,3 +12,4 @@ glium = { version = "0.25", default-features = true }
 imgui = { version = "0.2.0"}
 imgui-glium-renderer = { version = "0.2.0"}
 imgui-winit-support = { version = "0.2.0"}
+try_or = "0.1"

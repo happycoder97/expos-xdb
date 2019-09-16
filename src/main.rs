@@ -3,8 +3,11 @@
 #[macro_use]
 extern crate imgui;
 
-mod xsm;
 use xsm::XSM;
+
+mod xsm;
+#[macro_use]
+extern crate try_or;
 
 mod ui;
 mod ui_support;
