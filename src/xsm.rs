@@ -1,7 +1,6 @@
+use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command};
-
-use std::fs;
 
 const XSM_PAGE_LEN: usize = 512;
 
@@ -12,10 +11,11 @@ pub struct XSM {
     mode: Mode,
     regs: XSMRegs,
     page_table: Vec<XSMPageTableEntry>,
-    errors: Vec<XSMError>,
+    errors: Vec<String>,
     output: Vec<String>,
     halted: bool,
     status: String,
+    last_code: (usize, usize, Vec<String>),
 }
 
 #[derive(Debug)]
@@ -117,6 +117,7 @@ impl XSM {
             output: Vec::new(),
             halted: false,
             status: String::new(),
+            last_code: (0, 0, Vec::new()),
         };
 
         xsm.load_state();
@@ -141,17 +142,29 @@ impl XSM {
 
     // Returns (base_addr, ip, code)
     pub fn get_code(&mut self, max_lines: usize) -> (usize, usize, Vec<String>) {
-        let ip: usize = self
+        let ip: usize = match self
             .regs
             .ip
-            .parse()
-            .expect("IP is not an unsigned integer.");
+            .parse() {
+            Ok(ip) => ip,
+            Err(_) => {
+//                .expect("IP is not an unsigned integer.");
+                self.errors.push("IP is not an unsigned number".to_owned());
+                return self.last_code.clone();
+            }
+        };
 
         let max_addr = max_lines * 2;
         let start;
         let code = if let Mode::User = self.mode {
-            let max_range = Self::get_valid_mem_range(ip, &self.page_table)
-                .expect("IP not found in page table.");
+            let max_range =
+                match Self::get_valid_mem_range(ip, &self.page_table) {
+                    Ok(r) => r,
+                    Err((ip, page)) => {
+                        self.errors.push(format!("IP: {}, Page: {} not found in page table", ip, page));
+                        return self.last_code.clone();
+                    }
+                };
             let start_ =
                 std::cmp::max(ip as isize - max_addr as isize / 2, max_range.0 as isize) as usize;
             start = start_ + (start_ % 2);
@@ -178,7 +191,7 @@ impl XSM {
         &self.page_table
     }
 
-    pub fn get_errors(&self) -> &Vec<XSMError> {
+    pub fn get_errors(&self) -> &Vec<String> {
         &self.errors
     }
 
@@ -205,7 +218,6 @@ impl XSM {
     /// or right after sending step command
     /// Returns: Mode, Program output if there was an out instruction
     fn load_state(&mut self) {
-        self.errors.clear();
         self._read_status();
         self._read_regs();
         self._read_page_table();
@@ -286,13 +298,13 @@ impl XSM {
         let ptbr: usize = if let Ok(ptbr) = self.regs.ptbr.parse() {
             ptbr
         } else {
-            self.errors.push(XSMError::PTBRInvalid);
+            self.errors.push(format!("PTBR: '{}' is invalid", self.regs.ptbr));
             return;
         };
         let ptlr: usize = if let Ok(ptlr) = self.regs.ptlr.parse() {
             ptlr
         } else {
-            self.errors.push(XSMError::PTLRInvalid);
+            self.errors.push(format!("PTLR: '{}' is invalid", self.regs.ptlr));
             return;
         };
         let page_table_str = self.read_mem_range(ptbr, ptbr + ptlr * 2);
@@ -419,13 +431,24 @@ impl XSM {
         Ok(data)
     }
 
+    /// Return Ok(start_range, end_range) or Err(IP, Page)
     fn get_valid_mem_range(
         include_addr: usize,
         page_table: &Vec<XSMPageTableEntry>,
-    ) -> Option<(usize, usize)> {
+    ) -> Result<(usize, usize), (usize, usize)> {
         let page = include_addr / XSM_PAGE_LEN;
-        let pt_entry: &XSMPageTableEntry = page_table.get(page)?;
-        let _phy: usize = pt_entry.phy.parse().ok()?;
+        let pt_entry: &XSMPageTableEntry = match page_table.get(page) {
+            Some(e) => e,
+            None => {
+                return Err((include_addr, page));
+            }
+        };
+        let _phy: usize = match pt_entry.phy.parse().ok() {
+            Some(e) => e,
+            None => {
+                return Err((include_addr, page));
+            }
+        };
 
         let mut preceding_page = page;
         while preceding_page > 0 {
@@ -449,7 +472,7 @@ impl XSM {
             }
         }
 
-        Some((
+        Ok((
             preceding_page * XSM_PAGE_LEN,
             succeeding_page * XSM_PAGE_LEN,
         ))
