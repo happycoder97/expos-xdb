@@ -10,3 +10,7 @@ cargo run
 ````
 
 # Running
+```
+xdb /path/to/xsm --debug <other options..>
+``` 
+
