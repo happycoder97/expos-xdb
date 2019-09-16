@@ -1,3 +1,5 @@
+use std::any::Any;
+use std::collections::HashMap;
 use std::convert::TryInto;
 
 use imgui::{Condition, Ui};
@@ -13,6 +15,7 @@ pub struct UI {
     last_time: f64,
     input_cmd: imgui::ImString,
     ff_till: usize,
+    data: HashMap<&'static str, Box<dyn Any>>,
 }
 
 impl UI {
@@ -26,6 +29,7 @@ impl UI {
             update_delay: 1.0,
             input_cmd: imgui::ImString::new(""),
             ff_till: 0,
+            data: Default::default(),
         }
     }
 
@@ -186,7 +190,7 @@ impl UI {
                     .enter_returns_true(true)
                     .build();
                 self.ff_till = ff_till as usize;
-                ff_till_pressed = ff_till_pressed || ui.button(im_str!("Fast forward till step"), [0.0,0.0]);
+                ff_till_pressed = ff_till_pressed || ui.button(im_str!("Fast forward till step"), [0.0, 0.0]);
                 if ff_till_pressed && ff_till > self.step as i32 {
                     let step = ff_till as usize - self.step;
                     self.xsm.step(step);
@@ -200,6 +204,38 @@ impl UI {
                     ui.text(im_str!("Next instruction  is HALT"));
                     ui.text(im_str!("Machine is auto-paused by the debugger."));
                     ui.text(im_str!("Use other windows to inspect the state of the machine."));
+                }
+            });
+    }
+
+    pub fn render_mem_window(&mut self, ui: &mut Ui, title: &'static str) {
+        struct MemStruct {
+            mem_addr: i32,
+            is_virtual: bool,
+            len: i32,
+            data: Vec<String>
+        };
+        if !self.data.contains_key(title) {
+            self.data.insert(title, Box::new(MemStruct {
+                mem_addr: 0,
+                is_virtual: false,
+                len: 0,
+                data: Vec::new()
+            }));
+        }
+        let data: &mut MemStruct = self.data.get_mut(title).unwrap().downcast_mut().unwrap();
+
+        imgui::Window::new(&im_str!("{}",title))
+            .size([300.0, 100.0], Condition::FirstUseEver)
+            .build(ui, || {
+                ui.input_int(im_str!("Memory Address"), &mut data.mem_addr).build();
+                ui.checkbox(im_str!("Virtual Address"), &mut data.is_virtual);
+                ui.input_int(im_str!("Length"), &mut data.len).build();
+                if ui.button(im_str!("Fetch"), [0.0,0.0]) {
+//                    self.xsm.get_mem()
+                }
+                for (i, line) in data.data.iter().enumerate() {
+                    ui.text(im_str!("{}: {}", i as i32+data.mem_addr, line));
                 }
             });
     }
