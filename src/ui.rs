@@ -1,7 +1,8 @@
+use std::convert::TryInto;
+
 use imgui::{Condition, Ui};
 
 use crate::xsm::XSM;
-use std::convert::TryInto;
 
 pub struct UI {
     xsm: XSM,
@@ -10,7 +11,8 @@ pub struct UI {
     update_delay: f64,
     step_size: usize,
     last_time: f64,
-    input_cmd: imgui::ImString
+    input_cmd: imgui::ImString,
+    ff_till: usize,
 }
 
 impl UI {
@@ -22,7 +24,8 @@ impl UI {
             step_size: 1,
             last_time: 0.0,
             update_delay: 1.0,
-            input_cmd: imgui::ImString::new("")
+            input_cmd: imgui::ImString::new(""),
+            ff_till: 0,
         }
     }
 
@@ -132,16 +135,15 @@ impl UI {
                 ui.separator();
                 if self.is_continue {
                     ui.text(im_str!("Pause execution to send commands to xsm"));
-                    if ui.button(im_str!("Pause"), [0.0,0.0]) {
+                    if ui.button(im_str!("Pause"), [0.0, 0.0]) {
                         self.is_continue = false;
                     }
                 } else {
-                    if ui.button(im_str!("Resume"), [0.0,0.0]) {
+                    if ui.button(im_str!("Resume"), [0.0, 0.0]) {
                         self.is_continue = true;
                     }
                     ui.input_text(im_str!("debug>"), &mut self.input_cmd).build();
-                    if ui.button(im_str!("Send"), [0.0, 0.0]) {
-                    }
+                    if ui.button(im_str!("Send"), [0.0, 0.0]) {}
                 }
             });
     }
@@ -152,7 +154,7 @@ impl UI {
             .build(ui, || {
                 ui.checkbox(im_str!("Continue"), &mut self.is_continue);
                 let mut step_size = self.step_size as i32;
-                ui.input_int(im_str!("Update Delay"), &mut step_size)
+                ui.input_int(im_str!("Step Size"), &mut step_size)
                     .build();
                 self.step_size = step_size.try_into().unwrap_or(1);
                 let mut update_delay = self.update_delay as f32;
@@ -175,6 +177,29 @@ impl UI {
                     if ui.button(im_str!("Resume"), [0.0, 0.0]) {
                         self.is_continue = true;
                     }
+                }
+
+                ui.separator();
+                ui.text(im_str!("Current step: {}", self.step));
+                let mut ff_till = self.ff_till as i32;
+                let mut ff_till_pressed = ui.input_int(im_str!(""), &mut ff_till)
+                    .enter_returns_true(true)
+                    .build();
+                self.ff_till = ff_till as usize;
+                ff_till_pressed = ff_till_pressed || ui.button(im_str!("Fast forward till step"), [0.0,0.0]);
+                if ff_till_pressed && ff_till > self.step as i32 {
+                    let step = ff_till as usize - self.step;
+                    self.xsm.step(step);
+                    self.step += step;
+                    self.last_time = ui.time();
+                }
+
+                if self.xsm.is_next_halt() {
+                    self.is_continue = false;
+                    ui.separator();
+                    ui.text(im_str!("Next instruction  is HALT"));
+                    ui.text(im_str!("Machine is auto-paused by the debugger."));
+                    ui.text(im_str!("Use other windows to inspect the state of the machine."));
                 }
             });
     }
