@@ -14,7 +14,14 @@ pub struct UI {
 
 impl UI {
     pub fn new(xsm: XSM) -> Self {
-        Self { xsm, is_continue: true, step: 0, step_size: 1, last_time: 0.0, update_delay: 1.0 }
+        Self {
+            xsm,
+            is_continue: true,
+            step: 0,
+            step_size: 1,
+            last_time: 0.0,
+            update_delay: 1.0,
+        }
     }
 
     fn render_code(&mut self, ui: &mut Ui) {
@@ -26,7 +33,8 @@ impl UI {
                 for (i, code) in code_lines.iter().enumerate() {
                     let instr_addr = base + 2 * i;
                     if instr_addr == ip {
-                        imgui::MenuItem::new(&im_str!("{}: {} ---- (IP)", instr_addr, code)).build(ui);
+                        imgui::MenuItem::new(&im_str!("{}: {} ---- (IP)", instr_addr, code))
+                            .build(ui);
                     } else {
                         imgui::MenuItem::new(&im_str!("{}: {}", instr_addr, code)).build(ui);
                     }
@@ -118,10 +126,12 @@ impl UI {
             .build(ui, || {
                 ui.checkbox(im_str!("Continue"), &mut self.is_continue);
                 let mut step_size = self.step_size as i32;
-                ui.input_int(im_str!("Update Delay"), &mut step_size).build();
+                ui.input_int(im_str!("Update Delay"), &mut step_size)
+                    .build();
                 self.step_size = step_size.try_into().unwrap_or(1);
                 let mut update_delay = self.update_delay as f32;
-                ui.input_float(im_str!("Update Delay"), &mut update_delay).build();
+                ui.input_float(im_str!("Update Delay"), &mut update_delay)
+                    .build();
                 self.update_delay = update_delay.into();
                 if ui.button(im_str!("Fast Forward"), [0.0, 0.0]) {
                     self.update_delay = 0.1;

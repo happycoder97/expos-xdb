@@ -15,5 +15,5 @@ fn main() {
     let xsm = XSM::spawn_new(XSM_CMDLINE).expect("Error loading xsm");
     let mut xsm_ui = ui::UI::new(xsm);
     let sys = ui_support::init("XDB - Visual Debugger for eXpOS");
-    sys.main_loop(|_, ui| {xsm_ui.render_all(ui)});
+    sys.main_loop(|_, ui| xsm_ui.render_all(ui));
 }

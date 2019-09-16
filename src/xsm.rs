@@ -152,16 +152,14 @@ impl XSM {
         let code = if let Mode::User = self.mode {
             let max_range = Self::get_valid_mem_range(ip, &self.page_table)
                 .expect("IP not found in page table.");
-            let start_ = std::cmp::max(
-                ip as isize - max_addr as isize / 2,
-                max_range.0 as isize,
-            ) as usize;
+            let start_ =
+                std::cmp::max(ip as isize - max_addr as isize / 2, max_range.0 as isize) as usize;
             start = start_ + (start_ % 2);
             let end_ = std::cmp::min(ip + max_addr - max_addr / 2, max_range.1);
             let end = end_ - (end_ % 2);
             self.read_mem_range_vir(start, end).unwrap()
         } else {
-            let start_ = std::cmp::max(ip as isize - max_addr as isize/ 2, 0) as usize;
+            let start_ = std::cmp::max(ip as isize - max_addr as isize / 2, 0) as usize;
             start = start_ + (start_ % 2);
             // FIXME
             let end_ = std::cmp::min(ip + max_addr - max_addr / 2, 99999);
