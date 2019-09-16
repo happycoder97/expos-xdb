@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command};
 use std::thread::sleep;
 use std::time::Duration;
@@ -9,7 +9,7 @@ const XSM_PAGE_LEN: usize = 512;
 pub struct XSM {
     xsm: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    stdout: crossbeam_channel::Receiver<String>,
     mode: Mode,
     regs: XSMRegs,
     page_table: Vec<XSMPageTableEntry>,
@@ -96,7 +96,7 @@ impl Default for XSMRegs {
 
 impl XSM {
     pub fn spawn_new(command: &str) -> Result<XSM, ()> {
-        let mut stdbuf_args = vec!["--output=L"];
+        let mut stdbuf_args = vec!["--output=0"];
         stdbuf_args.extend(command.split_whitespace());
 
         let mut xsm_process = Command::new("stdbuf")
@@ -109,12 +109,21 @@ impl XSM {
 
         let stdout = xsm_process.stdout.take().expect("Failed to get stdout");
         let stdin = xsm_process.stdin.take().expect("Failed to get stdin");
-        let buf_reader = BufReader::new(stdout);
+        let (stdout_tx, stdout_rx) = crossbeam_channel::bounded(100);
+        std::thread::spawn(move || {
+            let mut buf_reader = BufReader::new(stdout);
+            let mut buf = String::new();
+            loop {
+                buf_reader.read_line(&mut buf);
+                stdout_tx.send(buf.clone());
+                buf.clear();
+            }
+        });
 
         let mut xsm = XSM {
             xsm: xsm_process,
             stdin,
-            stdout: buf_reader,
+            stdout: stdout_rx,
             mode: Mode::Kernel,
             regs: XSMRegs::default(),
             page_table: Vec::new(),
@@ -223,11 +232,14 @@ impl XSM {
 
     fn get_stdout(&mut self, lines: usize) -> Vec<String> {
         let mut vec = Vec::with_capacity(lines);
-        for _ in 0..lines {
-            vec.push(String::new());
-            self.stdout
-                .read_line(vec.last_mut().unwrap())
-                .expect("Failed to read from stdout");
+        if lines == 0 {
+            while let Ok(s) = self.stdout.recv_timeout(Duration::from_millis(10)) {
+                vec.push(s);
+            }
+        } else {
+            for _ in 0..lines {
+                vec.push(self.stdout.recv().unwrap());
+            }
         }
         vec
     }
@@ -246,7 +258,7 @@ impl XSM {
 
     /// ------------ Called by load state --------------- ///
     fn _read_status(&mut self) {
-        let mut lines = self.get_stdout(3);
+        let mut lines = self.get_stdout(0);
         if lines[0]
             .trim_start_matches("debug> ")
             .starts_with("Machine is halting.")
@@ -254,33 +266,21 @@ impl XSM {
             self.halted = true;
             return;
         }
+        lines[0] = lines[0].trim_start_matches("debug> ").to_owned();
 
-        let mode_line;
-        if lines[0]
-            .trim_start_matches("debug> ")
-            .starts_with("Previous instruction at IP =")
-        {
-            self.status.clear();
-            for line in lines.iter() {
-                if line.starts_with("Next instruction") {
-                    self.is_next_halt = line.split(": ").last().unwrap().starts_with("HALT");
-                }
-                self.status += line;
-            }
-            mode_line = &lines[1];
-        } else {
-            lines.extend(self.get_stdout(1).into_iter());
-            self.status.clear();
-            for line in lines.iter().skip(1) {
-                if line.starts_with("Next instruction") {
-                    self.is_next_halt = line.split(": ").last().unwrap().starts_with("HALT");
-                }
-                self.status += line;
-            }
-            self.output
-                .push(lines[0].trim_start_matches("debug> ").to_owned());
-            mode_line = &lines[2];
+        self.status.clear();
+        for line in lines.iter().skip(lines.len() - 3) {
+            self.status.push_str(line);
         }
+
+        for line in lines.iter().take(lines.len() - 3) {
+            self.output.push(line.clone());
+        }
+
+        let next_instr_line = lines.last().unwrap();
+        self.is_next_halt = next_instr_line.split(": ").last().unwrap().starts_with("HALT");
+
+        let mode_line = &lines[lines.len() - 2];
         let mode_char = mode_line.chars().nth(6).unwrap();
         self.mode = match mode_char {
             'K' => Mode::Kernel,
