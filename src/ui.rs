@@ -10,6 +10,7 @@ pub struct UI {
     update_delay: f64,
     step_size: usize,
     last_time: f64,
+    input_cmd: imgui::ImString
 }
 
 impl UI {
@@ -21,6 +22,7 @@ impl UI {
             step_size: 1,
             last_time: 0.0,
             update_delay: 1.0,
+            input_cmd: imgui::ImString::new("")
         }
     }
 
@@ -120,6 +122,30 @@ impl UI {
             });
     }
 
+    fn render_status(&mut self, ui: &mut Ui) {
+        imgui::Window::new(im_str!("Status"))
+            .size([300.0, 100.0], Condition::FirstUseEver)
+            .build(ui, || {
+                for line in self.xsm.get_status().lines() {
+                    ui.text(&line);
+                }
+                ui.separator();
+                if self.is_continue {
+                    ui.text(im_str!("Pause execution to send commands to xsm"));
+                    if ui.button(im_str!("Pause"), [0.0,0.0]) {
+                        self.is_continue = false;
+                    }
+                } else {
+                    if ui.button(im_str!("Resume"), [0.0,0.0]) {
+                        self.is_continue = true;
+                    }
+                    ui.input_text(im_str!("debug>"), &mut self.input_cmd).build();
+                    if ui.button(im_str!("Send"), [0.0, 0.0]) {
+                    }
+                }
+            });
+    }
+
     fn render_control_panel(&mut self, ui: &mut Ui) {
         imgui::Window::new(im_str!("Control Panel"))
             .size([300.0, 100.0], Condition::FirstUseEver)
@@ -140,6 +166,16 @@ impl UI {
                 if ui.button(im_str!("Normal"), [0.0, 0.0]) {
                     self.update_delay = 0.8;
                 }
+                ui.same_line(0.0);
+                if self.is_continue {
+                    if ui.button(im_str!("Pause"), [0.0, 0.0]) {
+                        self.is_continue = false;
+                    }
+                } else {
+                    if ui.button(im_str!("Resume"), [0.0, 0.0]) {
+                        self.is_continue = true;
+                    }
+                }
             });
     }
 
@@ -150,6 +186,7 @@ impl UI {
         self.render_page_table(ui);
         self.render_errors(ui);
         self.render_output(ui);
+        self.render_status(ui);
         self.render_control_panel(ui);
 
         if self.is_continue && ui.time() - self.last_time > self.update_delay {
