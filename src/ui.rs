@@ -1,21 +1,27 @@
 use imgui::{Condition, Ui};
 
 use crate::xsm::XSM;
+use std::convert::TryInto;
 
 pub struct UI {
     xsm: XSM,
+    is_continue: bool,
+    step: usize,
+    update_delay: f64,
+    step_size: usize,
+    last_time: f64,
 }
 
 impl UI {
     pub fn new(xsm: XSM) -> Self {
-        Self { xsm }
+        Self { xsm, is_continue: true, step: 0, step_size: 1, last_time: 0.0, update_delay: 1.0 }
     }
 
     fn render_code(&mut self, ui: &mut Ui) {
         imgui::Window::new(im_str!("Code"))
             .size([300.0, 100.0], Condition::FirstUseEver)
             .build(ui, || {
-                let lines = 30;
+                let lines = 10;
                 let (base, ip, code_lines) = self.xsm.get_code(lines);
                 for (i, code) in code_lines.iter().enumerate() {
                     let instr_addr = base + 2 * i;
@@ -106,6 +112,27 @@ impl UI {
             });
     }
 
+    fn render_control_panel(&mut self, ui: &mut Ui) {
+        imgui::Window::new(im_str!("Control Panel"))
+            .size([300.0, 100.0], Condition::FirstUseEver)
+            .build(ui, || {
+                ui.checkbox(im_str!("Continue"), &mut self.is_continue);
+                let mut step_size = self.step_size as i32;
+                ui.input_int(im_str!("Update Delay"), &mut step_size).build();
+                self.step_size = step_size.try_into().unwrap_or(1);
+                let mut update_delay = self.update_delay as f32;
+                ui.input_float(im_str!("Update Delay"), &mut update_delay).build();
+                self.update_delay = update_delay.into();
+                if ui.button(im_str!("Fast Forward"), [0.0, 0.0]) {
+                    self.update_delay = 0.1;
+                }
+                ui.same_line(0.0);
+                if ui.button(im_str!("Normal"), [0.0, 0.0]) {
+                    self.update_delay = 0.8;
+                }
+            });
+    }
+
     pub fn render_all(&mut self, ui: &mut Ui) {
         self.render_code(ui);
         self.render_regs1(ui);
@@ -113,5 +140,12 @@ impl UI {
         self.render_page_table(ui);
         self.render_errors(ui);
         self.render_output(ui);
+        self.render_control_panel(ui);
+
+        if self.is_continue && ui.time() - self.last_time > self.update_delay {
+            self.xsm.step(self.step_size);
+            self.step += self.step_size;
+            self.last_time = ui.time();
+        }
     }
 }
