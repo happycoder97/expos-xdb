@@ -16,6 +16,7 @@ pub struct XSM {
     errors: Vec<String>,
     output: Vec<String>,
     is_next_halt: bool,
+    is_exception_edge: bool,
     halted: bool,
     status: String,
     last_code: (usize, usize, Vec<String>),
@@ -103,9 +104,10 @@ impl XSM {
             .args(&stdbuf_args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .spawn().map_err(|_| {
-            println!("Error: Failed to launch command.");
-        })?;
+            .spawn()
+            .map_err(|_| {
+                println!("Error: Failed to launch command.");
+            })?;
 
         let stdout = xsm_process.stdout.take().expect("Failed to get stdout");
         let stdin = xsm_process.stdin.take().expect("Failed to get stdin");
@@ -130,6 +132,7 @@ impl XSM {
             errors: Vec::new(),
             output: Vec::new(),
             is_next_halt: false,
+            is_exception_edge: true,
             halted: false,
             status: String::new(),
             last_code: (0, 0, Vec::new()),
@@ -167,12 +170,15 @@ impl XSM {
         self.is_next_halt
     }
 
+    pub fn is_exception_edge(&self) -> bool {
+        self.is_exception_edge
+    }
+
     // Returns (base_addr, ip, code)
     pub fn get_code(&mut self, max_lines: usize) -> (usize, usize, Vec<String>) {
         let ip: usize = match self.regs.ip.parse() {
             Ok(ip) => ip,
             Err(_) => {
-                //                .expect("IP is not an unsigned integer.");
                 self.errors.push("IP is not an unsigned number".to_owned());
                 return self.last_code.clone();
             }
@@ -238,7 +244,15 @@ impl XSM {
             }
         } else {
             for _ in 0..lines {
-                vec.push(self.stdout.recv().unwrap());
+                vec.push(
+                    self.stdout
+                        .recv_timeout(Duration::from_millis(1000))
+                        .map_err(|e| {
+                            eprintln!("Read so far");
+                            dbg!(&vec);
+                        })
+                        .unwrap(),
+                );
             }
         }
         vec
@@ -259,6 +273,10 @@ impl XSM {
     /// ------------ Called by load state --------------- ///
     fn _read_status(&mut self) {
         let mut lines = self.get_stdout(0);
+        if lines.len() < 3 {
+            dbg!(lines);
+            return;
+        }
         if lines[0]
             .trim_start_matches("debug> ")
             .starts_with("Machine is halting.")
@@ -278,7 +296,21 @@ impl XSM {
         }
 
         let next_instr_line = lines.last().unwrap();
-        self.is_next_halt = next_instr_line.split(": ").last().unwrap().starts_with("HALT");
+        self.is_next_halt = next_instr_line
+            .split(": ")
+            .last()
+            .unwrap()
+            .starts_with("HALT");
+
+        let next_ip_str: &str = next_instr_line
+            .split("IP = ")
+            .last()
+            .unwrap()
+            .split(",")
+            .next()
+            .unwrap();
+        let next_ip: u32 = next_ip_str.parse().unwrap();
+        self.is_exception_edge = next_ip == 1024;
 
         let mode_line = &lines[lines.len() - 2];
         let mode_char = mode_line.chars().nth(6).unwrap();
@@ -432,11 +464,7 @@ impl XSM {
         data
     }
 
-    pub fn read_mem_range_vir(
-        &mut self,
-        start_addr: usize,
-        end_addr: usize,
-    ) -> Vec<String> {
+    pub fn read_mem_range_vir(&mut self, start_addr: usize, end_addr: usize) -> Vec<String> {
         let mut data = Vec::new();
         let (start_page_vir, end_page_vir, start_page_skip, end_page_take) =
             Self::_pageify(start_addr, end_addr);

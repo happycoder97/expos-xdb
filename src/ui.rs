@@ -133,7 +133,7 @@ impl UI {
             .size([300.0, 100.0], Condition::FirstUseEver)
             .build(ui, || {
                 for line in self.xsm.get_status().lines() {
-                    ui.text_wrapped(&im_str!("{}",line));
+                    ui.text_wrapped(&im_str!("{}", line));
                 }
                 ui.separator();
                 /*
@@ -161,8 +161,7 @@ impl UI {
                 ui.checkbox(im_str!("Continue"), &mut self.is_continue);
                 let mut step_size = self.step_size as i32;
                 ui.push_item_width(100.0);
-                ui.input_int(im_str!("Step Size"), &mut step_size)
-                    .build();
+                ui.input_int(im_str!("Step Size"), &mut step_size).build();
                 self.step_size = step_size.try_into().unwrap_or(1);
                 let mut update_delay = self.update_delay as f32;
                 ui.input_float(im_str!("Update Delay"), &mut update_delay)
@@ -212,6 +211,16 @@ impl UI {
                         "Use other windows to inspect the state of the machine."
                     ));
                 }
+
+                if self.xsm.is_exception_edge() {
+                    self.is_continue = false;
+                    ui.separator();
+                    ui.text_wrapped(im_str!("EXCEPTION DETECTED"));
+                    ui.text_wrapped(im_str!("Machine is auto-paused by the debugger."));
+                    ui.text_wrapped(im_str!(
+                        "Use other windows to inspect the state of the machine."
+                    ));
+                }
             });
     }
 
@@ -244,18 +253,22 @@ impl UI {
             .size([300.0, 100.0], Condition::FirstUseEver)
             .build(ui, || {
                 let data: &MemStruct = self.data.get(title).unwrap().downcast_ref().unwrap();
-                let data_new = if data.fetch||data.live {
+                let data_new = if data.fetch || data.live {
                     let start_addr: usize = (data.mem_addr.max(0)) as _;
                     let end_addr: usize = (data.mem_addr.max(0) + data.len.max(0)) as _;
                     if data.is_virtual {
-                        Some((start_addr, self.xsm.read_mem_range_vir(start_addr, end_addr)))
+                        Some((
+                            start_addr,
+                            self.xsm.read_mem_range_vir(start_addr, end_addr),
+                        ))
                     } else {
                         Some((start_addr, self.xsm.read_mem_range(start_addr, end_addr)))
                     }
                 } else {
                     None
                 };
-                let data: &mut MemStruct = self.data.get_mut(title).unwrap().downcast_mut().unwrap();
+                let data: &mut MemStruct =
+                    self.data.get_mut(title).unwrap().downcast_mut().unwrap();
                 if let Some((start_addr, data_new)) = data_new {
                     data.fetch = false;
                     data.data_base_addr = start_addr;
